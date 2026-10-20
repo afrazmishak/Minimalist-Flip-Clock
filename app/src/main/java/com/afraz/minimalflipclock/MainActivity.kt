@@ -6,6 +6,8 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,8 +15,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -28,16 +33,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Keep the display awake while this app is visible.
+        // Prevent the tablet from automatically sleeping.
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         )
 
-        // Lock the clock interface to landscape orientation.
+        // Landscape orientation.
         requestedOrientation =
             ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
 
-        // Hide Android system bars.
+        // Immersive fullscreen mode.
         val controller = WindowCompat.getInsetsController(
             window,
             window.decorView
@@ -50,15 +55,15 @@ class MainActivity : ComponentActivity() {
         controller.hide(WindowInsetsCompat.Type.systemBars())
 
         setContent {
-            ClockScreen()
+            FlipClockScreen()
         }
     }
 }
 
 @Composable
-fun ClockScreen() {
+fun FlipClockScreen() {
 
-    // Read the tablet's local system time.
+    // Read local tablet time
     val currentTime by produceState(
         initialValue = LocalTime.now()
     ) {
@@ -68,14 +73,14 @@ fun ClockScreen() {
         }
     }
 
-    val hour = currentTime.hour
-    val displayHour = (hour % 12).let {
+    val hour24 = currentTime.hour
+    val hour12 = (hour24 % 12).let {
         if (it == 0) 12 else it
     }
 
-    val hours = displayHour.toString().padStart(2, '0')
+    val hours = hour12.toString().padStart(2, '0')
     val minutes = currentTime.minute.toString().padStart(2, '0')
-    val period = if (hour < 12) "AM" else "PM"
+    val period = if (hour24 < 12) "AM" else "PM"
 
     BoxWithConstraints(
         modifier = Modifier
@@ -92,7 +97,7 @@ fun ClockScreen() {
             verticalAlignment = Alignment.CenterVertically
         ) {
 
-            ClockCard(
+            FlipClockCard(
                 value = hours,
                 label = period,
                 fontSize = clockFontSize,
@@ -101,7 +106,7 @@ fun ClockScreen() {
                     .height(cardHeight)
             )
 
-            ClockCard(
+            FlipClockCard(
                 value = minutes,
                 fontSize = clockFontSize,
                 modifier = Modifier
@@ -113,23 +118,67 @@ fun ClockScreen() {
 }
 
 @Composable
-fun ClockCard(
+fun FlipClockCard(
     value: String,
-    fontSize: androidx.compose.ui.unit.TextUnit,
+    fontSize: TextUnit,
     modifier: Modifier = Modifier,
     label: String? = null
 ) {
+
+    var displayedValue by remember {
+        mutableStateOf(value)
+    }
+
+    var previousValue by remember {
+        mutableStateOf(value)
+    }
+
+    val rotation = remember { Animatable(0f) }
+
+    // Animate only when the displayed time changes.
+    LaunchedEffect(value) {
+        if (value != displayedValue) {
+            previousValue = displayedValue
+            rotation.snapTo(0f)
+
+            rotation.animateTo(
+                targetValue = 180f,
+                animationSpec = tween(durationMillis = 700)
+            )
+
+            displayedValue = value
+            rotation.snapTo(0f)
+        }
+    }
+
+    val angle = rotation.value
+
+    // First half: outgoing number
+    // Second half: incoming number
+    val visibleValue = when {
+        angle == 0f -> displayedValue
+        angle < 90f -> previousValue
+        else -> value
+    }
+
+    val visibleRotation = when {
+        angle < 90f -> -angle
+        else -> 180f - angle
+    }
+
     Box(
         modifier = modifier
-            .background(
-                Color(0xFF1A1A1A),
-                RoundedCornerShape(12.dp)
-            ),
+            .graphicsLayer {
+                rotationX = visibleRotation
+                        cameraDistance = 12f * density
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1A1A1A)),
         contentAlignment = Alignment.Center
     ) {
 
         Text(
-            text = value,
+            text = visibleValue,
             fontSize = fontSize,
             fontWeight = FontWeight.Bold,
             color = Color(0xFFF5F5F5),
